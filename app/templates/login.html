@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — BaatChit</title>
+  <meta name="description" content="Sign in to BaatChit — your secure real-time messaging platform." />
+  <link rel="stylesheet" href="/static/css/auth.css" />
+</head>
+<body>
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+        </svg>
+      </div>
+      <div class="auth-logo-text">Baat<span>Chit</span></div>
+    </div>
+
+    <h1 class="auth-heading">Welcome back</h1>
+    <p class="auth-sub">Sign in to continue to your chats</p>
+
+    <div id="alertBox" class="alert"></div>
+
+    <form id="loginForm" novalidate>
+      <div class="form-group">
+        <label class="form-label" for="username">Username</label>
+        <input id="username" name="username" type="text" class="form-input"
+               placeholder="your_username" autocomplete="username" required />
+        <p class="field-error" id="usernameError"></p>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input id="password" name="password" type="password" class="form-input"
+               placeholder="••••••••" autocomplete="current-password" required />
+        <p class="field-error" id="passwordError"></p>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submitBtn">
+        <span class="btn-text">Sign In</span>
+        <span class="btn-loader"></span>
+      </button>
+    </form>
+
+    <p class="auth-footer">
+      Don't have an account? <a href="/signup-page">Create one</a>
+    </p>
+  </div>
+
+  <script src="/static/js/login.js"></script>
+</body>
+</html>

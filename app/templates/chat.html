@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BaatChit</title>
+  <meta name="description" content="BaatChit — Real-time private and group messaging." />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<!-- ── Reconnecting Banner ─────────────────────── -->
+<div class="conn-banner" id="connBanner">
+  ⚡ Reconnecting…
+</div>
+
+<div class="app-shell">
+
+  <!-- ══ SIDEBAR ════════════════════════════════ -->
+  <aside class="sidebar">
+
+    <div class="sidebar-header">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+        </svg>
+        BaatChit
+      </div>
+      <div class="user-pill" id="userPill">
+        <span id="currentUsername">…</span>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="sidebar-tabs">
+      <button class="tab-btn active" id="tabDirect" onclick="switchTab('direct')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+        </svg>
+        Direct
+      </button>
+      <button class="tab-btn" id="tabGroups" onclick="switchTab('groups')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+        </svg>
+        Groups
+      </button>
+    </div>
+
+    <!-- Search -->
+    <div class="sidebar-search">
+      <input type="search" class="search-input" id="searchInput"
+             placeholder="Search by username…" oninput="filterList(this.value)" />
+    </div>
+
+    <!-- Contact / Group list -->
+    <div class="contact-list" id="contactList">
+      <div class="empty-list">Loading…</div>
+    </div>
+
+    <!-- New Group -->
+    <button class="new-group-btn" id="newGroupBtn" style="display:none"
+            onclick="openNewGroupModal()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+      </svg>
+      New Group
+    </button>
+
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+        </svg>
+        Sign Out
+      </button>
+    </div>
+  </aside>
+
+  <!-- ══ CHAT AREA ═══════════════════════════════ -->
+  <main class="chat-area" id="chatArea">
+    <div class="chat-placeholder" id="placeholder">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+      </svg>
+      <h2>Select a conversation</h2>
+      <p>Choose a contact or group from the sidebar to start chatting.</p>
+    </div>
+
+    <!-- Active chat — hidden until user selected -->
+    <div id="activeChat" style="display:none; flex-direction:column; height:100%;">
+
+      <div class="chat-header" id="chatHeader">
+        <div class="chat-header-info">
+          <div class="chat-header-name" id="chatName">—</div>
+          <div class="chat-header-sub" id="chatSub">—</div>
+        </div>
+        <div class="header-badge" id="chatBadge" style="display:none"></div>
+        <div class="chat-header-actions">
+          <button class="header-action-btn" id="viewMembersBtn" style="display:none" onclick="showMembers()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+            </svg>
+            Members
+          </button>
+          
+          <button class="header-action-btn" id="chatOptionsBtn" onclick="toggleChatOptions(event)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+            </svg>
+          </button>
+          
+          <div class="options-menu" id="chatOptionsMenu">
+            <button id="exitGroupBtn" style="display:none" onclick="exitGroup()">Exit Group</button>
+            <button id="resolveGroupBtn" style="display:none" class="danger" onclick="resolveGroup()">Resolve Group</button>
+            <button id="deleteChatBtn" class="danger" onclick="deleteChat()">Delete Chat</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="messages-container" id="messagesContainer">
+        <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreMessages()"
+                style="display:none">Load earlier messages</button>
+      </div>
+
+      <div class="chat-input-area">
+        <div id="replyPreview" class="reply-preview-container" style="display:none">
+          <div class="reply-preview-content">
+            <div class="reply-preview-label">Replying to</div>
+            <div class="reply-preview-sender" id="replyPreviewSender"></div>
+            <div class="reply-preview-text" id="replyPreviewText"></div>
+          </div>
+          <button class="reply-preview-close" onclick="cancelReply()">&times;</button>
+        </div>
+        <div id="editPreview" class="reply-preview-container edit-preview" style="display:none">
+          <div class="edit-info">
+            <div class="edit-label">Editing Message</div>
+            <div id="editText" class="edit-text"></div>
+          </div>
+          <button class="cancel-edit" onclick="cancelEdit()">✕</button>
+        </div>
+
+        <textarea class="input-box" id="msgInput"
+                  placeholder="Type a message…" rows="1"
+                  onkeydown="handleEnter(event)"
+                  oninput="autoResize(this)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- WhatsApp-style Message Context Menu -->
+    <div id="msgCtxMenu" class="msg-ctx-menu" style="display:none;"></div>
+  </main>
+</div>
+
+<!-- ── Toast Container ────────────────────────── -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ── New Group Modal ─────────────────────────── -->
+<div class="modal-backdrop" id="groupModal">
+  <div class="modal">
+    <h3>Create New Group</h3>
+    <div class="modal-field">
+      <label>Group Name</label>
+      <input type="text" class="modal-input" id="groupNameInput" placeholder="e.g. Team Alpha" maxlength="100" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('groupModal')">Cancel</button>
+      <button class="btn-primary" onclick="createGroup()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Member Modal ────────────────────────── -->
+<div class="modal-backdrop" id="addMemberModal">
+  <div class="modal">
+    <h3>Add Member</h3>
+    <div class="modal-field">
+      <label>Username</label>
+      <input type="text" class="modal-input" id="addMemberInput" placeholder="username" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('addMemberModal')">Cancel</button>
+      <button class="btn-primary" onclick="addMember()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── View Members Modal ───────────────────────── -->
+<div class="modal-backdrop" id="membersModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Group Members</h3>
+      <button class="close-btn" onclick="closeModal('membersModal')">&times;</button>
+    </div>
+    <div class="members-list" id="membersList">
+      <!-- Members injected here -->
+    </div>
+  </div>
+</div>
+
+<!-- ── Forward Message Modal ───────────────────────── -->
+<div class="modal-backdrop" id="forwardModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Forward Message</h3>
+      <button class="close-btn" onclick="closeModal('forwardModal')">&times;</button>
+    </div>
+    <div class="modal-field">
+      <label>Search Contact or Group</label>
+      <input type="text" class="modal-input" id="forwardSearchInput" placeholder="Search..." oninput="filterForwardList(this.value)" />
+    </div>
+    <div class="members-list" id="forwardList">
+      <!-- Forward targets injected here -->
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
