@@ -146,24 +146,28 @@ def group_chat_history(
     if not is_member(db, group_id, current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member")
 
-    msgs, total = get_group_messages(db, group_id, skip, limit)
+    from app.core.crypto import decrypt_content
+    from app.services.group_service import get_group_message_aggregate_status
     out = [
         GroupMessageOut(
             id=m.id,
             group_id=m.group_id,
             sender_id=m.sender_id,
             sender_username=m.sender.username if m.sender else None,
-            content=m.content,
+            content=decrypt_content(m.content),
             created_at=m.created_at,
             reply_to_id=m.reply_to_id,
-            reply_content=m.reply_to.content if m.reply_to else None,
+            reply_content=decrypt_content(m.reply_to.content) if m.reply_to else None,
             reply_sender=m.reply_to.sender.username if m.reply_to and m.reply_to.sender else None,
             is_edited=m.is_edited,
             is_deleted=m.is_deleted,
+            status=get_group_message_aggregate_status(db, m.id)
         )
         for m in msgs
     ]
     return PaginatedGroupMessages(messages=out, total=total, skip=skip, limit=limit)
+
+
 
 
 @router.post(

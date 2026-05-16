@@ -48,6 +48,7 @@ def conversation_history(
 
     messages, total = fetch_conversation(db, current_user.id, other.id, skip, limit)
 
+    from app.core.crypto import decrypt_content
     out = []
     for m in messages:
         out.append(
@@ -57,17 +58,18 @@ def conversation_history(
                 receiver_id=m.receiver_id,
                 sender_username=m.sender.username if m.sender else None,
                 receiver_username=m.receiver.username if m.receiver else None,
-                content=m.content,
+                content=decrypt_content(m.content),
                 status=m.status,
                 created_at=m.created_at,
                 reply_to_id=m.reply_to_id,
-                reply_content=m.reply_to.content if m.reply_to else None,
+                reply_content=decrypt_content(m.reply_to.content) if m.reply_to else None,
                 reply_sender=m.reply_to.sender.username if m.reply_to and m.reply_to.sender else None,
                 is_edited=m.is_edited,
                 is_deleted=m.is_deleted,
             )
         )
     return PaginatedMessages(messages=out, total=total, skip=skip, limit=limit)
+
 
 
 @router.post("/send", response_model=PrivateMessageOut, status_code=status.HTTP_201_CREATED)

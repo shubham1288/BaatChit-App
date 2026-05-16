@@ -58,6 +58,18 @@ const MESSAGE_LIMIT = 50;
 
 // Reply State
 let currentReplyTo = null; // { id, content, sender }
+
+// ─── Global Error Handling ───────────────────────────────────────────────────
+window.onerror = function(msg, url, line, col, error) {
+  console.error("Global JS Error:", msg, "at", url, line, col);
+  // Optionally show to user if in debug mode
+  return false;
+};
+
+window.onunhandledrejection = function(event) {
+  console.error("Unhandled Promise Rejection:", event.reason);
+};
+
 let editingMessageId = null; // Message ID being edited
 
 // Intersection Observer for Read Receipts
@@ -722,17 +734,29 @@ async function sendFallback(content, _unused) {
       const res = await authFetch('/conversations/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiver: activeTarget.username, content, reply_to_id: currentReplyTo?.id }),
+        body: JSON.stringify({ 
+          receiver: activeTarget.username, 
+          content, 
+          reply_to_id: currentReplyTo?.id,
+          reply_content: currentReplyTo?.content,
+          reply_sender: currentReplyTo?.sender
+        }),
       });
       if (res.ok) handleIncomingPrivate(await res.json());
     } else {
       const res = await authFetch(`/groups/${activeTarget.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, reply_to_id: currentReplyTo?.id }),
+        body: JSON.stringify({ 
+          content, 
+          reply_to_id: currentReplyTo?.id,
+          reply_content: currentReplyTo?.content,
+          reply_sender: currentReplyTo?.sender
+        }),
       });
       if (res.ok) handleIncomingGroup(await res.json());
     }
+
     cancelReply();
   } catch (e) {
     showToast('Failed to send message', 'error');
@@ -967,9 +991,9 @@ async function appendGroupMessage(msg, prepend = false) {
             ` : ''}
             <div class="msg-text">${escHtml(msg.content)}</div>
           `}
-
-        ${renderReactions(msg.reactions)}
+          ${typeof renderReactions !== 'undefined' ? renderReactions(msg.reactions) : ''}
         </div>
+
         ${!msg.is_deleted ? `<button class="msg-dropdown-btn" title="Message options"
           onclick="openMsgCtxMenu(event,{id:${msg.id},content:'${escJs(msg.content)}',sender:'${escJs(msg.sender_username)}',isMe:${isMe},isGroup:true,isDeleted:${!!msg.is_deleted}})">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
