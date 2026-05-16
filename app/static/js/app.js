@@ -68,7 +68,7 @@ const readObserver = new IntersectionObserver((entries) => {
             const msgId = parseInt(msgEl.id.replace('msg-', ''));
             const isIncoming = msgEl.classList.contains('incoming');
             
-            if (isIncoming && ws && ws.readyState === WebSocket.OPEN) {
+            if (isIncoming && ws && ws.readyState === WebSocket.OPEN && activeTarget) {
                 // Check if already read (optional optimization)
                 ws.send(JSON.stringify({
                     type: 'mark_read',
@@ -76,6 +76,7 @@ const readObserver = new IntersectionObserver((entries) => {
                     chat_type: activeTarget.type
                 }));
             }
+
             readObserver.unobserve(msgEl);
         }
     });
@@ -666,6 +667,8 @@ async function sendMessage() {
     return;
   }
 
+  console.log("Sending message:", { type: activeTarget.type, receiver: activeTarget.username || activeTarget.id, content });
+  
   if (activeTarget.type === 'direct') {
     ws.send(JSON.stringify({
       type: 'private',
@@ -675,7 +678,6 @@ async function sendMessage() {
       reply_content: currentReplyTo?.content,
       reply_sender: currentReplyTo?.sender
     }));
-    setTimeout(loadActiveConversations, 500);
   } else {
     ws.send(JSON.stringify({
       type: 'group',
@@ -689,6 +691,7 @@ async function sendMessage() {
 
   cancelReply();
 }
+
 
 // ─── Reply Context ────────────────────────────────────────────────────────────
 function setReply(id, content, sender) {
