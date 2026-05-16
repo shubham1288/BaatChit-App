@@ -671,7 +671,9 @@ async function sendMessage() {
       type: 'private',
       receiver: activeTarget.username,
       content: content,
-      reply_to_id: currentReplyTo?.id
+      reply_to_id: currentReplyTo?.id,
+      reply_content: currentReplyTo?.content,
+      reply_sender: currentReplyTo?.sender
     }));
     setTimeout(loadActiveConversations, 500);
   } else {
@@ -679,9 +681,12 @@ async function sendMessage() {
       type: 'group',
       group_id: activeTarget.id,
       content: content,
-      reply_to_id: currentReplyTo?.id
+      reply_to_id: currentReplyTo?.id,
+      reply_content: currentReplyTo?.content,
+      reply_sender: currentReplyTo?.sender
     }));
   }
+
   cancelReply();
 }
 
