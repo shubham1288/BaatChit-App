@@ -910,6 +910,7 @@ async function appendPrivateMessage(msg, prepend = false) {
         <div class="msg-row ${isMe ? 'outgoing' : 'incoming'}" id="msg-${msg.id}">
         <div class="msg-content-wrapper">
             <div class="bubble">
+            ${msg.is_edited ? '<div class="edited-tag">(edited)</div>' : ''}
             ${msg.is_deleted ? '<span class="deleted-text">This message was deleted</span>' : `
                 ${msg.reply_content ? `
                     <div class="reply-block" onclick="scrollToMessage(${msg.reply_to_id})">
@@ -917,8 +918,9 @@ async function appendPrivateMessage(msg, prepend = false) {
                     <div class="reply-block-text">${escHtml(msg.reply_content)}</div>
                     </div>
                 ` : ''}
-                <div class="msg-text">${escHtml(msg.content)}${msg.is_edited ? ' <span class="edited-tag">(edited)</span>' : ''}</div>
+                <div class="msg-text">${escHtml(msg.content)}</div>
             `}
+
             ${typeof renderReactions !== 'undefined' ? renderReactions(msg.reactions) : ''}
             </div>
             ${!msg.is_deleted ? `<button class="msg-dropdown-btn" title="Message options"
@@ -947,6 +949,7 @@ async function appendGroupMessage(msg, prepend = false) {
       <div class="msg-content-wrapper">
         ${!isMe ? `<div class="sender-label">${escHtml(msg.sender_username || '')}</div>` : ''}
         <div class="bubble">
+          ${msg.is_edited ? '<div class="edited-tag">(edited)</div>' : ''}
           ${msg.is_deleted ? '<span class="deleted-text">This message was deleted</span>' : `
             ${msg.reply_content ? `
                 <div class="reply-block" onclick="scrollToMessage(${msg.reply_to_id})">
@@ -954,8 +957,9 @@ async function appendGroupMessage(msg, prepend = false) {
                 <div class="reply-block-text">${escHtml(msg.reply_content)}</div>
                 </div>
             ` : ''}
-            <div class="msg-text">${escHtml(msg.content)}${msg.is_edited ? ' <span class="edited-tag">(edited)</span>' : ''}</div>
+            <div class="msg-text">${escHtml(msg.content)}</div>
           `}
+
         ${renderReactions(msg.reactions)}
         </div>
         ${!msg.is_deleted ? `<button class="msg-dropdown-btn" title="Message options"

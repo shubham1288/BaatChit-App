@@ -976,11 +976,14 @@ html, body {
 }
 
 .edited-tag {
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   font-style: italic;
-  color: var(--text-muted);
-  margin-left: 4px;
+  color: #ffffff;
+  margin-bottom: 4px;
+  opacity: 0.8;
+  display: block;
 }
+
 
 .deleted-text {
   font-style: italic;
