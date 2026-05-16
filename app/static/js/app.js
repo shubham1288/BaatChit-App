@@ -60,6 +60,28 @@ const MESSAGE_LIMIT = 50;
 let currentReplyTo = null; // { id, content, sender }
 let editingMessageId = null; // Message ID being edited
 
+// Intersection Observer for Read Receipts
+const readObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            const msgEl = entry.target;
+            const msgId = parseInt(msgEl.id.replace('msg-', ''));
+            const isIncoming = msgEl.classList.contains('incoming');
+            
+            if (isIncoming && ws && ws.readyState === WebSocket.OPEN) {
+                // Check if already read (optional optimization)
+                ws.send(JSON.stringify({
+                    type: 'mark_read',
+                    id: msgId,
+                    chat_type: activeTarget.type
+                }));
+            }
+            readObserver.unobserve(msgEl);
+        }
+    });
+}, { threshold: 0.5 });
+
+
 requireAuth();
 document.getElementById('currentUsername').textContent = getUser() || '…';
 const me = getUser() || '';
@@ -89,7 +111,9 @@ function connectWebSocket() {
     else if (data.type === 'message_edited') handleMessageEdited(data);
     else if (data.type === 'message_deleted') handleMessageDeleted(data);
     else if (data.type === 'message_reacted') handleMessageReacted(data);
+    else if (data.type === 'message_status_update') handleMessageStatusUpdate(data);
     else if (data.type === 'error')       showToast(data.detail, 'error');
+
   };
 
   ws.onclose = () => scheduleReconnect();
@@ -737,9 +761,10 @@ async function handleIncomingPrivate(data) {
     }, false);
     scrollToBottom();
     if (sender !== me) {
-      authFetch(`/conversations/${data.id}/read`, { method: 'PATCH' }).catch(() => {});
+      // mark_read is now handled by IntersectionObserver
     }
     loadActiveConversations();
+
   } else if (sender !== me) {
     showToast(`💬 ${sender}: ${data.content.slice(0, 60)}`, 'info');
     loadActiveConversations();
@@ -764,10 +789,12 @@ async function handleIncomingGroup(data) {
       reply_sender: data.reply_sender,
       is_edited: data.is_edited,
       is_deleted: data.is_deleted,
-      reactions: data.reactions
+      reactions: data.reactions,
+      status: data.status
     }, false);
     scrollToBottom();
   } else if (sender !== me) {
+
     const grp = allGroups.find(g => g.id === data.group_id);
     showToast(`👥 ${grp?.name || 'Group'}: ${data.content.slice(0, 60)}`, 'info');
   }
@@ -791,13 +818,19 @@ async function handleMessageEdited(data) {
 function handleMessageDeleted(data) {
   const el = document.getElementById(`msg-${data.id}`);
   if (!el) return;
-  const bubble = el.querySelector('.bubble');
-  if (bubble) {
-    bubble.innerHTML = '<span class="deleted-text">This message was deleted</span>';
-  }
-  const actions = el.querySelector('.msg-actions');
-  if (actions) actions.remove();
+  el.remove();
 }
+
+function handleMessageStatusUpdate(data) {
+    const el = document.getElementById(`msg-${data.id}`);
+    if (!el) return;
+    const tick = el.querySelector('.status-tick');
+    if (tick) {
+        tick.className = `status-tick ${data.status}`;
+        tick.innerHTML = statusIcon(data.status);
+    }
+}
+
 
 function initiateEdit(id, content) {
   cancelReply();
@@ -907,6 +940,7 @@ async function appendPrivateMessage(msg, prepend = false) {
 async function appendGroupMessage(msg, prepend = false) {
   const isMe = msg.sender_username === me || msg.sender_id === -1;
   const time = formatTime(msg.created_at);
+  const status = msg.status || 'sent';
 
   const html = `
     <div class="msg-row group-msg ${isMe ? 'outgoing' : 'incoming'}" id="msg-${msg.id}">
@@ -928,7 +962,10 @@ async function appendGroupMessage(msg, prepend = false) {
           onclick="openMsgCtxMenu(event,{id:${msg.id},content:'${escJs(msg.content)}',sender:'${escJs(msg.sender_username)}',isMe:${isMe},isGroup:true,isDeleted:${!!msg.is_deleted}})">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
         </button>` : ''}
-        <div class="bubble-meta"><span>${time}</span></div>
+        <div class="bubble-meta">
+          <span>${time}</span>
+          ${isMe ? `<span class="status-tick ${status}">${statusIcon(status)}</span>` : ''}
+        </div>
       </div>
     </div>`;
   insertMessage(html, prepend);
@@ -937,12 +974,21 @@ async function appendGroupMessage(msg, prepend = false) {
 function insertMessage(html, prepend) {
   const container = document.getElementById('messagesContainer');
   const loadMoreBtn = document.getElementById('loadMoreBtn');
+  
+  let newEl;
   if (prepend) {
     loadMoreBtn.insertAdjacentHTML('afterend', html);
+    newEl = loadMoreBtn.nextElementSibling;
   } else {
     container.insertAdjacentHTML('beforeend', html);
+    newEl = container.lastElementChild;
+  }
+  
+  if (newEl && newEl.classList.contains('incoming')) {
+      readObserver.observe(newEl);
   }
 }
+
 
 // ─── Group Management ─────────────────────────────────────────────────────────
 function openNewGroupModal() {

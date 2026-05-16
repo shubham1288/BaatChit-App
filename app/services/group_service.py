@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 
-from app.db.models import Group, GroupMember, GroupMessage, User
+from app.db.models import Group, GroupMember, GroupMessage, User, GroupMessageStatus, MessageStatus
 from app.core.crypto import encrypt_content, decrypt_content
+
 
 
 # ─────────────────────────────────────────────
@@ -164,8 +165,75 @@ def get_group_messages(
         m.content = decrypt_content(m.content)
         if m.reply_to:
             m.reply_to.content = decrypt_content(m.reply_to.content)
+        # Add aggregate status
+        m.status = get_group_message_aggregate_status(db, m.id)
             
     return msgs, total
+
+
+def mark_group_message_delivered(db: Session, message_id: int, user_id: int):
+    status = db.query(GroupMessageStatus).filter(
+        GroupMessageStatus.message_id == message_id,
+        GroupMessageStatus.user_id == user_id
+    ).first()
+    if not status:
+        status = GroupMessageStatus(message_id=message_id, user_id=user_id, status=MessageStatus.delivered)
+        db.add(status)
+        db.commit()
+    elif status.status == MessageStatus.sent:
+        status.status = MessageStatus.delivered
+        db.commit()
+
+
+def mark_group_message_read(db: Session, message_id: int, user_id: int):
+    status = db.query(GroupMessageStatus).filter(
+        GroupMessageStatus.message_id == message_id,
+        GroupMessageStatus.user_id == user_id
+    ).first()
+    if not status:
+        status = GroupMessageStatus(message_id=message_id, user_id=user_id, status=MessageStatus.read)
+        db.add(status)
+        db.commit()
+    elif status.status != MessageStatus.read:
+        status.status = MessageStatus.read
+        db.commit()
+
+
+def get_group_message_aggregate_status(db: Session, message_id: int) -> MessageStatus:
+    msg = db.query(GroupMessage).filter(GroupMessage.id == message_id).first()
+    if not msg:
+        return MessageStatus.sent
+    
+    member_ids = get_member_ids(db, msg.group_id)
+    # Exclude sender from aggregate status check
+    other_member_ids = [uid for uid in member_ids if uid != msg.sender_id]
+    
+    if not other_member_ids:
+        return MessageStatus.read
+
+    statuses = db.query(GroupMessageStatus).filter(
+        GroupMessageStatus.message_id == message_id,
+        GroupMessageStatus.user_id.in_(other_member_ids)
+    ).all()
+    
+    status_map = {s.user_id: s.status for s in statuses}
+    
+    all_read = True
+    all_delivered = True
+    
+    for uid in other_member_ids:
+        s = status_map.get(uid)
+        if s != MessageStatus.read:
+            all_read = False
+        if s not in [MessageStatus.delivered, MessageStatus.read]:
+            all_delivered = False
+            
+    if all_read:
+        return MessageStatus.read
+    if all_delivered:
+        return MessageStatus.delivered
+    return MessageStatus.sent
+
 
 
 def delete_group(db: Session, group_id: int) -> bool:

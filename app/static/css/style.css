@@ -471,7 +471,9 @@ html, body {
 .status-tick svg { width: 16px; height: 16px; }
 .status-tick.sent      svg { color: #ffffffaa; }
 .status-tick.delivered svg { color: #ffffffcc; }
-.status-tick.read      svg { color: #7dd4fc; }
+.status-tick.read      svg { color: #34b7f1; }
+
+
 
 /* ─── Message Input ─────────────────────────── */
 .chat-input-area {

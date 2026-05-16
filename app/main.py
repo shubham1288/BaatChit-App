@@ -186,8 +186,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     await manager.send_to_user(receiver_username, payload)
                     mark_delivered(db, msg.id)
                     payload["status"] = "delivered"
+                    # Notify sender of delivery
+                    await manager.send_to_user(username, {
+                        "type": "message_status_update",
+                        "id": msg.id,
+                        "status": "delivered",
+                        "chat_type": "private"
+                    })
 
                 await manager.send_to_user(username, payload)
+
 
             # ── GROUP MESSAGE ────────────────────────
             elif msg_type == "group":
@@ -239,7 +247,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     payload["reply_content"] = decrypt_content(msg.reply_to.content)
                     payload["reply_sender"] = msg.reply_to.sender.username
 
+                from app.services.group_service import mark_group_message_delivered, get_group_message_aggregate_status
+                for m_username in member_usernames:
+                    if m_username != username and manager.is_online(m_username):
+                        m_user = get_user_by_username(db, m_username)
+                        if m_user:
+                            mark_group_message_delivered(db, msg.id, m_user.id)
+                
+                payload["status"] = get_group_message_aggregate_status(db, msg.id).value
                 await manager.broadcast_to_group(member_usernames, payload)
+
 
             # ── EDIT PRIVATE ────────────────────────
             elif msg_type == "edit_private":
@@ -378,6 +395,41 @@ async def websocket_endpoint(websocket: WebSocket):
                         "group_id": group_id
                     }
                     await manager.broadcast_to_group(member_usernames, payload)
+
+            # ── MARK READ ───────────────────────────
+            elif msg_type == "mark_read":
+                msg_id = data.get("id")
+                chat_type = data.get("chat_type")
+                if not msg_id: continue
+
+                if chat_type == "private":
+                    from app.services.private_chat_service import mark_read
+                    msg = mark_read(db, msg_id)
+                    if msg:
+                        sender = get_user_by_id(db, msg.sender_id)
+                        if sender:
+                            await manager.send_to_user(sender.username, {
+                                "type": "message_status_update",
+                                "id": msg_id,
+                                "status": "read",
+                                "chat_type": "private"
+                            })
+                else:
+                    from app.services.group_service import mark_group_message_read, get_group_message_aggregate_status
+                    mark_group_message_read(db, msg_id, current_user.id)
+                    msg = db.query(models.GroupMessage).filter(models.GroupMessage.id == msg_id).first()
+                    if msg:
+                        new_status = get_group_message_aggregate_status(db, msg_id)
+                        sender = get_user_by_id(db, msg.sender_id)
+                        if sender:
+                            await manager.send_to_user(sender.username, {
+                                "type": "message_status_update",
+                                "id": msg_id,
+                                "status": new_status.value,
+                                "chat_type": "group",
+                                "group_id": msg.group_id
+                            })
+
 
     except WebSocketDisconnect:
         manager.disconnect(username, websocket)

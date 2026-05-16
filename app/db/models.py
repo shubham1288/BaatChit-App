@@ -193,6 +193,34 @@ class GroupMessage(Base):
 
 
 # ─────────────────────────────────────────────
+# GROUP MESSAGE STATUS
+# ─────────────────────────────────────────────
+
+class GroupMessageStatus(Base):
+    __tablename__ = "group_message_statuses"
+    __table_args__ = (UniqueConstraint("message_id", "user_id", name="uq_group_msg_status"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(
+        Integer, ForeignKey("group_messages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status = Column(
+        Enum(MessageStatus), default=MessageStatus.sent, nullable=False, index=True
+    )
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    message = relationship("GroupMessage", backref="statuses")
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<GroupMessageStatus msg={self.message_id} user={self.user_id} status={self.status}>"
+
+
+
+# ─────────────────────────────────────────────
 # REFRESH TOKEN
 # ─────────────────────────────────────────────
 

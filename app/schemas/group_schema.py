@@ -3,6 +3,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.db.models import MessageStatus
+
+
 
 class GroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
@@ -49,7 +52,9 @@ class GroupMessageOut(BaseModel):
     reply_to_id: Optional[int] = None
     reply_content: Optional[str] = None
     reply_sender: Optional[str] = None
+    status: MessageStatus = MessageStatus.sent
     is_edited: bool = False
+
     is_deleted: bool = False
 
     model_config = {"from_attributes": True}
