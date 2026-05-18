@@ -129,7 +129,17 @@ function connectWebSocket() {
 
   };
 
-  ws.onclose = () => scheduleReconnect();
+  ws.onclose = async (event) => {
+    if (event.code === 1008) {
+        console.log("WS Token expired or invalid. Attempting to refresh token...");
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+            connectWebSocket();
+            return;
+        }
+    }
+    scheduleReconnect();
+  };
   ws.onerror = () => ws.close();
 }
 

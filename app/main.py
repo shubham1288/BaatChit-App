@@ -123,15 +123,23 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept(subprotocol=websocket.headers.get("sec-websocket-protocol"))
 
-    db = SessionLocal()
+    db_init = SessionLocal()
     try:
-        current_user = get_user_by_username(db, username)
-        if not current_user or not current_user.is_active:
+        current_user_init = get_user_by_username(db_init, username)
+        if not current_user_init or not current_user_init.is_active:
             await websocket.close(code=1008, reason="User not found or inactive")
             return
+        current_user_id = current_user_init.id
+    finally:
+        db_init.close()
 
-        await manager.connect(username, websocket)
+    class CurrentUserStub:
+        id = current_user_id
+    current_user = CurrentUserStub()
 
+    await manager.connect(username, websocket)
+
+    try:
         while True:
             try:
                 data = await websocket.receive_json()
@@ -142,299 +150,303 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type")
             logger.debug("Received WS message from %s: %s", username, msg_type)
 
-            # ── PRIVATE MESSAGE ──────────────────────
-            if msg_type == "private":
-                receiver_username = data.get("receiver")
-                content = data.get("content", "")
+            db = SessionLocal()
+            try:
+
+                # ── PRIVATE MESSAGE ──────────────────────
+                if msg_type == "private":
+                    receiver_username = data.get("receiver")
+                    content = data.get("content", "")
                 
-                if not receiver_username or not content or len(content) > 5000:
-                    continue
+                    if not receiver_username or not content or len(content) > 5000:
+                        continue
 
-                try:
-                    message_rate_limiter.check(username)
-                except Exception:
-                    await manager.send_to_user(
-                        username, {"type": "error", "detail": "Rate limit exceeded"}
-                    )
-                    continue
+                    try:
+                        message_rate_limiter.check(username)
+                    except Exception:
+                        await manager.send_to_user(
+                            username, {"type": "error", "detail": "Rate limit exceeded"}
+                        )
+                        continue
 
-                receiver = get_user_by_username(db, receiver_username)
-                if not receiver:
-                    continue
+                    receiver = get_user_by_username(db, receiver_username)
+                    if not receiver:
+                        continue
 
-                reply_to_id = data.get("reply_to_id")
-                msg = create_private_message(db, current_user.id, receiver.id, content, reply_to_id)
+                    reply_to_id = data.get("reply_to_id")
+                    msg = create_private_message(db, current_user.id, receiver.id, content, reply_to_id)
 
-                payload = {
-                    "type": "private_message",
-                    "id": msg.id,
-                    "sender": username,
-                    "receiver": receiver_username,
-                    "content": decrypt_content(msg.content),
-                    "status": msg.status.value,
-                    "timestamp": msg.created_at.isoformat(),
-                    "reply_to_id": msg.reply_to_id,
-                    "reply_content": data.get("reply_content"),
-                    "reply_sender": data.get("reply_sender"),
-                }
-                
-                if msg.reply_to and not payload["reply_content"]:
-                    payload["reply_content"] = decrypt_content(msg.reply_to.content)
-                    payload["reply_sender"] = msg.reply_to.sender.username
-
-                if manager.is_online(receiver_username):
-                    await manager.send_to_user(receiver_username, payload)
-                    mark_delivered(db, msg.id)
-                    payload["status"] = "delivered"
-                    # Notify sender of delivery
-                    await manager.send_to_user(username, {
-                        "type": "message_status_update",
-                        "id": msg.id,
-                        "status": "delivered",
-                        "chat_type": "private"
-                    })
-
-                await manager.send_to_user(username, payload)
-
-
-            # ── GROUP MESSAGE ────────────────────────
-            elif msg_type == "group":
-                group_id = data.get("group_id")
-                content = data.get("content", "")
-                
-                if not group_id or not content or len(content) > 5000:
-                    continue
-
-                try:
-                    group_id = int(group_id)
-                except (TypeError, ValueError):
-                    continue
-
-                if not is_member(db, group_id, current_user.id):
-                    continue
-
-                try:
-                    message_rate_limiter.check(username)
-                except Exception:
-                    await manager.send_to_user(
-                        username, {"type": "error", "detail": "Rate limit exceeded"}
-                    )
-                    continue
-
-                reply_to_id = data.get("reply_to_id")
-                msg = send_group_message(db, group_id, current_user.id, content, reply_to_id)
-
-                member_ids = get_member_ids(db, group_id)
-                member_usernames = []
-                for uid in member_ids:
-                    u = get_user_by_id(db, uid)
-                    if u:
-                        member_usernames.append(u.username)
-
-                payload = {
-                    "type": "group_message",
-                    "id": msg.id,
-                    "group_id": group_id,
-                    "sender": username,
-                    "content": decrypt_content(msg.content),
-                    "timestamp": msg.created_at.isoformat(),
-                    "reply_to_id": msg.reply_to_id,
-                    "reply_content": data.get("reply_content"),
-                    "reply_sender": data.get("reply_sender"),
-                }
-                
-                if msg.reply_to and not payload["reply_content"]:
-                    payload["reply_content"] = decrypt_content(msg.reply_to.content)
-                    payload["reply_sender"] = msg.reply_to.sender.username
-
-                from app.services.group_service import mark_group_message_delivered, get_group_message_aggregate_status
-                for m_username in member_usernames:
-                    if m_username != username and manager.is_online(m_username):
-                        m_user = get_user_by_username(db, m_username)
-                        if m_user:
-                            mark_group_message_delivered(db, msg.id, m_user.id)
-                
-                payload["status"] = get_group_message_aggregate_status(db, msg.id).value
-                await manager.broadcast_to_group(member_usernames, payload)
-
-
-            # ── EDIT PRIVATE ────────────────────────
-            elif msg_type == "edit_private":
-                msg_id = data.get("id")
-                content = data.get("content", "").strip()
-                if not msg_id or not content: continue
-
-                from app.services.private_chat_service import update_private_message
-                msg = update_private_message(db, msg_id, content)
-                if msg and msg.sender_id == current_user.id:
-                    receiver = get_user_by_id(db, msg.receiver_id)
                     payload = {
-                        "type": "message_edited",
+                        "type": "private_message",
                         "id": msg.id,
-                        "chat_type": "private",
-                        "content": content,
+                        "sender": username,
+                        "receiver": receiver_username,
+                        "content": decrypt_content(msg.content),
+                        "status": msg.status.value,
+                        "timestamp": msg.created_at.isoformat(),
+                        "reply_to_id": msg.reply_to_id,
+                        "reply_content": data.get("reply_content"),
+                        "reply_sender": data.get("reply_sender"),
                     }
+                
+                    if msg.reply_to and not payload["reply_content"]:
+                        payload["reply_content"] = decrypt_content(msg.reply_to.content)
+                        payload["reply_sender"] = msg.reply_to.sender.username
+
+                    if manager.is_online(receiver_username):
+                        await manager.send_to_user(receiver_username, payload)
+                        mark_delivered(db, msg.id)
+                        payload["status"] = "delivered"
+                        # Notify sender of delivery
+                        await manager.send_to_user(username, {
+                            "type": "message_status_update",
+                            "id": msg.id,
+                            "status": "delivered",
+                            "chat_type": "private"
+                        })
+
                     await manager.send_to_user(username, payload)
-                    if receiver:
-                        await manager.send_to_user(receiver.username, payload)
 
-            # ── DELETE PRIVATE ──────────────────────
-            elif msg_type == "delete_private":
-                msg_id = data.get("id")
-                if not msg_id: continue
 
-                from app.services.private_chat_service import delete_private_message
-                msg = db.query(models.PrivateMessage).filter(models.PrivateMessage.id == msg_id).first()
-                if msg and msg.sender_id == current_user.id:
-                    receiver = get_user_by_id(db, msg.receiver_id)
-                    delete_private_message(db, msg_id)
-                    payload = {
-                        "type": "message_deleted",
-                        "id": msg_id,
-                        "chat_type": "private"
-                    }
-                    await manager.send_to_user(username, payload)
-                    if receiver:
-                        await manager.send_to_user(receiver.username, payload)
+                # ── GROUP MESSAGE ────────────────────────
+                elif msg_type == "group":
+                    group_id = data.get("group_id")
+                    content = data.get("content", "")
+                
+                    if not group_id or not content or len(content) > 5000:
+                        continue
 
-            # ── EDIT GROUP ──────────────────────────
-            elif msg_type == "edit_group":
-                msg_id = data.get("id")
-                content = data.get("content", "").strip()
-                if not msg_id or not content: continue
+                    try:
+                        group_id = int(group_id)
+                    except (TypeError, ValueError):
+                        continue
 
-                from app.services.group_service import update_group_message
-                msg = update_group_message(db, msg_id, content)
-                if msg and msg.sender_id == current_user.id:
-                    member_ids = get_member_ids(db, msg.group_id)
-                    member_usernames = [u.username for uid in member_ids if (u := get_user_by_id(db, uid))]
-                    payload = {
-                        "type": "message_edited",
-                        "id": msg.id,
-                        "chat_type": "group",
-                        "group_id": msg.group_id,
-                        "content": content,
-                    }
-                    await manager.broadcast_to_group(member_usernames, payload)
+                    if not is_member(db, group_id, current_user.id):
+                        continue
 
-            # ── REACT PRIVATE ────────────────────────
-            elif msg_type == "react_private":
-                msg_id = data.get("id")
-                emoji = data.get("emoji")
-                if not msg_id or not emoji: continue
+                    try:
+                        message_rate_limiter.check(username)
+                    except Exception:
+                        await manager.send_to_user(
+                            username, {"type": "error", "detail": "Rate limit exceeded"}
+                        )
+                        continue
 
-                msg = db.query(models.PrivateMessage).filter(models.PrivateMessage.id == msg_id).first()
-                if msg:
-                    current_reactions = dict(msg.reactions or {})
-                    if current_reactions.get(username) == emoji:
-                        del current_reactions[username]
-                    else:
-                        current_reactions[username] = emoji
-                    
-                    msg.reactions = current_reactions
-                    db.commit()
+                    reply_to_id = data.get("reply_to_id")
+                    msg = send_group_message(db, group_id, current_user.id, content, reply_to_id)
 
-                    receiver_usr = get_user_by_id(db, msg.receiver_id)
-                    sender_usr = get_user_by_id(db, msg.sender_id)
-                    payload = {
-                        "type": "message_reacted",
-                        "id": msg_id,
-                        "chat_type": "private",
-                        "reactions": current_reactions
-                    }
-                    
-                    if sender_usr:
-                        await manager.send_to_user(sender_usr.username, payload)
-                    if receiver_usr and receiver_usr.username != sender_usr.username:
-                        await manager.send_to_user(receiver_usr.username, payload)
-
-            # ── REACT GROUP ──────────────────────────
-            elif msg_type == "react_group":
-                msg_id = data.get("id")
-                emoji = data.get("emoji")
-                if not msg_id or not emoji: continue
-
-                msg = db.query(models.GroupMessage).filter(models.GroupMessage.id == msg_id).first()
-                if msg:
-                    current_reactions = dict(msg.reactions or {})
-                    if current_reactions.get(username) == emoji:
-                        del current_reactions[username]
-                    else:
-                        current_reactions[username] = emoji
-                    
-                    msg.reactions = current_reactions
-                    db.commit()
-
-                    member_ids = get_member_ids(db, msg.group_id)
-                    member_usernames = [u.username for uid in member_ids if (u := get_user_by_id(db, uid))]
-                    payload = {
-                        "type": "message_reacted",
-                        "id": msg_id,
-                        "chat_type": "group",
-                        "group_id": msg.group_id,
-                        "reactions": current_reactions
-                    }
-                    await manager.broadcast_to_group(member_usernames, payload)
-
-            # ── DELETE GROUP ────────────────────────
-            elif msg_type == "delete_group":
-                msg_id = data.get("id")
-                if not msg_id: continue
-
-                from app.services.group_service import delete_group_message
-                msg = db.query(models.GroupMessage).filter(models.GroupMessage.id == msg_id).first()
-                if msg and msg.sender_id == current_user.id:
-                    group_id = msg.group_id
-                    delete_group_message(db, msg_id)
                     member_ids = get_member_ids(db, group_id)
-                    member_usernames = [u.username for uid in member_ids if (u := get_user_by_id(db, uid))]
+                    member_usernames = []
+                    for uid in member_ids:
+                        u = get_user_by_id(db, uid)
+                        if u:
+                            member_usernames.append(u.username)
+
                     payload = {
-                        "type": "message_deleted",
-                        "id": msg_id,
-                        "chat_type": "group",
-                        "group_id": group_id
+                        "type": "group_message",
+                        "id": msg.id,
+                        "group_id": group_id,
+                        "sender": username,
+                        "content": decrypt_content(msg.content),
+                        "timestamp": msg.created_at.isoformat(),
+                        "reply_to_id": msg.reply_to_id,
+                        "reply_content": data.get("reply_content"),
+                        "reply_sender": data.get("reply_sender"),
                     }
+                
+                    if msg.reply_to and not payload["reply_content"]:
+                        payload["reply_content"] = decrypt_content(msg.reply_to.content)
+                        payload["reply_sender"] = msg.reply_to.sender.username
+
+                    from app.services.group_service import mark_group_message_delivered, get_group_message_aggregate_status
+                    for m_username in member_usernames:
+                        if m_username != username and manager.is_online(m_username):
+                            m_user = get_user_by_username(db, m_username)
+                            if m_user:
+                                mark_group_message_delivered(db, msg.id, m_user.id)
+                
+                    payload["status"] = get_group_message_aggregate_status(db, msg.id).value
                     await manager.broadcast_to_group(member_usernames, payload)
 
-            # ── MARK READ ───────────────────────────
-            elif msg_type == "mark_read":
-                msg_id = data.get("id")
-                chat_type = data.get("chat_type")
-                if not msg_id: continue
 
-                if chat_type == "private":
-                    from app.services.private_chat_service import mark_read
-                    msg = mark_read(db, msg_id)
+                # ── EDIT PRIVATE ────────────────────────
+                elif msg_type == "edit_private":
+                    msg_id = data.get("id")
+                    content = data.get("content", "").strip()
+                    if not msg_id or not content: continue
+
+                    from app.services.private_chat_service import update_private_message
+                    msg = update_private_message(db, msg_id, content)
+                    if msg and msg.sender_id == current_user.id:
+                        receiver = get_user_by_id(db, msg.receiver_id)
+                        payload = {
+                            "type": "message_edited",
+                            "id": msg.id,
+                            "chat_type": "private",
+                            "content": content,
+                        }
+                        await manager.send_to_user(username, payload)
+                        if receiver:
+                            await manager.send_to_user(receiver.username, payload)
+
+                # ── DELETE PRIVATE ──────────────────────
+                elif msg_type == "delete_private":
+                    msg_id = data.get("id")
+                    if not msg_id: continue
+
+                    from app.services.private_chat_service import delete_private_message
+                    msg = db.query(models.PrivateMessage).filter(models.PrivateMessage.id == msg_id).first()
+                    if msg and msg.sender_id == current_user.id:
+                        receiver = get_user_by_id(db, msg.receiver_id)
+                        delete_private_message(db, msg_id)
+                        payload = {
+                            "type": "message_deleted",
+                            "id": msg_id,
+                            "chat_type": "private"
+                        }
+                        await manager.send_to_user(username, payload)
+                        if receiver:
+                            await manager.send_to_user(receiver.username, payload)
+
+                # ── EDIT GROUP ──────────────────────────
+                elif msg_type == "edit_group":
+                    msg_id = data.get("id")
+                    content = data.get("content", "").strip()
+                    if not msg_id or not content: continue
+
+                    from app.services.group_service import update_group_message
+                    msg = update_group_message(db, msg_id, content)
+                    if msg and msg.sender_id == current_user.id:
+                        member_ids = get_member_ids(db, msg.group_id)
+                        member_usernames = [u.username for uid in member_ids if (u := get_user_by_id(db, uid))]
+                        payload = {
+                            "type": "message_edited",
+                            "id": msg.id,
+                            "chat_type": "group",
+                            "group_id": msg.group_id,
+                            "content": content,
+                        }
+                        await manager.broadcast_to_group(member_usernames, payload)
+
+                # ── REACT PRIVATE ────────────────────────
+                elif msg_type == "react_private":
+                    msg_id = data.get("id")
+                    emoji = data.get("emoji")
+                    if not msg_id or not emoji: continue
+
+                    msg = db.query(models.PrivateMessage).filter(models.PrivateMessage.id == msg_id).first()
                     if msg:
-                        sender = get_user_by_id(db, msg.sender_id)
-                        if sender:
-                            await manager.send_to_user(sender.username, {
-                                "type": "message_status_update",
-                                "id": msg_id,
-                                "status": "read",
-                                "chat_type": "private"
-                            })
-                else:
-                    from app.services.group_service import mark_group_message_read, get_group_message_aggregate_status
-                    mark_group_message_read(db, msg_id, current_user.id)
+                        current_reactions = dict(msg.reactions or {})
+                        if current_reactions.get(username) == emoji:
+                            del current_reactions[username]
+                        else:
+                            current_reactions[username] = emoji
+                    
+                        msg.reactions = current_reactions
+                        db.commit()
+
+                        receiver_usr = get_user_by_id(db, msg.receiver_id)
+                        sender_usr = get_user_by_id(db, msg.sender_id)
+                        payload = {
+                            "type": "message_reacted",
+                            "id": msg_id,
+                            "chat_type": "private",
+                            "reactions": current_reactions
+                        }
+                    
+                        if sender_usr:
+                            await manager.send_to_user(sender_usr.username, payload)
+                        if receiver_usr and receiver_usr.username != sender_usr.username:
+                            await manager.send_to_user(receiver_usr.username, payload)
+
+                # ── REACT GROUP ──────────────────────────
+                elif msg_type == "react_group":
+                    msg_id = data.get("id")
+                    emoji = data.get("emoji")
+                    if not msg_id or not emoji: continue
+
                     msg = db.query(models.GroupMessage).filter(models.GroupMessage.id == msg_id).first()
                     if msg:
-                        new_status = get_group_message_aggregate_status(db, msg_id)
-                        sender = get_user_by_id(db, msg.sender_id)
-                        if sender:
-                            await manager.send_to_user(sender.username, {
-                                "type": "message_status_update",
-                                "id": msg_id,
-                                "status": new_status.value,
-                                "chat_type": "group",
-                                "group_id": msg.group_id
-                            })
+                        current_reactions = dict(msg.reactions or {})
+                        if current_reactions.get(username) == emoji:
+                            del current_reactions[username]
+                        else:
+                            current_reactions[username] = emoji
+                    
+                        msg.reactions = current_reactions
+                        db.commit()
 
+                        member_ids = get_member_ids(db, msg.group_id)
+                        member_usernames = [u.username for uid in member_ids if (u := get_user_by_id(db, uid))]
+                        payload = {
+                            "type": "message_reacted",
+                            "id": msg_id,
+                            "chat_type": "group",
+                            "group_id": msg.group_id,
+                            "reactions": current_reactions
+                        }
+                        await manager.broadcast_to_group(member_usernames, payload)
+
+                # ── DELETE GROUP ────────────────────────
+                elif msg_type == "delete_group":
+                    msg_id = data.get("id")
+                    if not msg_id: continue
+
+                    from app.services.group_service import delete_group_message
+                    msg = db.query(models.GroupMessage).filter(models.GroupMessage.id == msg_id).first()
+                    if msg and msg.sender_id == current_user.id:
+                        group_id = msg.group_id
+                        delete_group_message(db, msg_id)
+                        member_ids = get_member_ids(db, group_id)
+                        member_usernames = [u.username for uid in member_ids if (u := get_user_by_id(db, uid))]
+                        payload = {
+                            "type": "message_deleted",
+                            "id": msg_id,
+                            "chat_type": "group",
+                            "group_id": group_id
+                        }
+                        await manager.broadcast_to_group(member_usernames, payload)
+
+                # ── MARK READ ───────────────────────────
+                elif msg_type == "mark_read":
+                    msg_id = data.get("id")
+                    chat_type = data.get("chat_type")
+                    if not msg_id: continue
+
+                    if chat_type == "private":
+                        from app.services.private_chat_service import mark_read
+                        msg = mark_read(db, msg_id)
+                        if msg:
+                            sender = get_user_by_id(db, msg.sender_id)
+                            if sender:
+                                await manager.send_to_user(sender.username, {
+                                    "type": "message_status_update",
+                                    "id": msg_id,
+                                    "status": "read",
+                                    "chat_type": "private"
+                                })
+                    else:
+                        from app.services.group_service import mark_group_message_read, get_group_message_aggregate_status
+                        mark_group_message_read(db, msg_id, current_user.id)
+                        msg = db.query(models.GroupMessage).filter(models.GroupMessage.id == msg_id).first()
+                        if msg:
+                            new_status = get_group_message_aggregate_status(db, msg_id)
+                            sender = get_user_by_id(db, msg.sender_id)
+                            if sender:
+                                await manager.send_to_user(sender.username, {
+                                    "type": "message_status_update",
+                                    "id": msg_id,
+                                    "status": new_status.value,
+                                    "chat_type": "group",
+                                    "group_id": msg.group_id
+                                })
+
+
+            finally:
+                db.close()
 
     except WebSocketDisconnect:
         manager.disconnect(username, websocket)
     except Exception as exc:
         logger.error("WebSocket error for %s: %s", username, exc, exc_info=True)
         manager.disconnect(username, websocket)
-    finally:
-        db.close()
