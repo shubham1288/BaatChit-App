@@ -413,7 +413,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     chat_type = data.get("chat_type")
                     if not msg_id: continue
 
-                    if chat_type == "private":
+                    if chat_type == "private" or chat_type == "direct":
                         from app.services.private_chat_service import mark_read
                         msg = mark_read(db, msg_id)
                         if msg:
