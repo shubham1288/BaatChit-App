@@ -1,3 +1,13 @@
+---
+title: BaatChit-WebApp
+emoji: 💬
+colorFrom: blue
+colorTo: pink
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # BaatChit App 💬
 
 BaatChit is a simple group chat application where users can create groups, send messages, reply to messages, delete messages, and react using basic emojis.
